@@ -1,0 +1,21 @@
+# Phase 5 check: prove the cover responds to a service call from an automation, not just a button.
+#
+# Paste under `automation:` in /config/configuration.yaml, or create it via
+# Settings > Automations & scenes > Create automation > Edit in YAML.
+
+- alias: Close blinds at sunset
+  triggers:
+    - trigger: sun
+      event: sunset
+  actions:
+    - action: cover.close_cover
+      target:
+        entity_id: cover.upstairs_blinds
+
+# To test it without waiting for sunset, use Settings > Automations > the three-dot menu > Run.
+# That skips the trigger and executes the action, which is the part being proven here.
+#
+# If you later add more blinds, list them all under entity_id. Mind the pacing: RFLink transmits
+# one RTS frame at a time (~3.2 s each) and the motors ignore a command that arrives too soon after
+# the previous one. With several covers in a single call the commands queue rather than overlap,
+# but if a blind is skipped, insert `- delay: "00:00:06"` between per-cover actions.

@@ -1,0 +1,48 @@
+# RFLink over the ESP32-C3 TCP bridge. Tested on Home Assistant 2026.9.2 (HAOS).
+#
+# Paste these blocks into /config/configuration.yaml (or include this file from it).
+# Nested format only: the legacy `cover: - platform: rflink` form is deprecated and is REMOVED in
+# Home Assistant 2026.12.0 (see the "Migrating from legacy configuration format" section of
+# https://www.home-assistant.io/integrations/rflink/).
+#
+# Bridge address measured 2026-09-12: rflink-bridge.local -> 192.168.1.50 (MAC AA:BB:CC:DD:EE:FF).
+# Pin that lease on the router. Use the IP, not the .local name: the rflink integration reconnects
+# at HA startup, and mDNS resolution at that moment is less reliable than a pinned address.
+rflink:
+  host: 192.168.1.50
+  port: 1234
+  # Docs default is 3600 s. 600 s sends a keepalive well before any NAT/AP idle timeout can
+  # silently drop the socket, which is the classic "entity exists but nothing moves" failure.
+  tcp_keepalive_idle_timer: 600
+  # Left at its default (true) deliberately: RFLink acks each RTS frame after ~3.2 s of transmit,
+  # measured on this gateway, and serialising on that ack is what keeps frames from overlapping.
+  # Only set false if commands visibly hang; the trade-off is that HA then fires commands blind
+  # and two RTS transmits can collide, which the motor ignores.
+  #
+  # wait_for_ack: false
+
+  cover:
+    devices:
+      # Paired 2026-09-12 as EEPROM record 4, rolling code seeded at 0101.
+      # The trailing _0 matters: python-rflink builds "{node};{protocol};{id};{switch};{command};",
+      # so RTS_0A0A0A_0 puts exactly `10;RTS;0A0A0A;0;UP;` on the wire — the documented RTS form
+      # where that field is unused.
+      RTS_0A0A0A_0:
+        name: Upstairs blinds
+        # The Situo 1 remote, as RFLink reports it on air: 20;xx;RTS;ID=a1b2c3;SWITCH=01;CMD=DOWN;
+        # Two-digit switch is required here. This only makes HA *listen*, so the entity follows
+        # the physical remote. HA never transmits on this address — record 0 holds a stale clone
+        # of it and must never be used for sending.
+        aliases:
+          - rts_a1b2c3_01
+        # Add `type: inverted` ONLY if open/close come out backwards. Untested until Phase 4,
+        # because UP/DOWN were verified over USB, not through the HA cover entity.
+
+# Debug logging for bringing this up. REMOVE once the cover works (Phase 5 step 4): it is noisy,
+# and RFLink's RTSSHOW output is plain text rather than 20;xx; packets, so python-rflink logs
+# those lines as unparseable. That is expected, not a fault.
+logger:
+  default: error
+  logs:
+    rflink: debug
+    homeassistant.components.rflink: debug

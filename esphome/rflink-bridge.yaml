@@ -1,0 +1,87 @@
+# RFLink Pro WiFi-to-serial bridge — ESP32-C3 SuperMini on the nodo-shop RFLink PRO V1.2
+#
+# Role: transparent byte pipe. TCP 1234 <-> UART 57600 8N1 to the Mega 2560 Pro running RFLink R51.
+# It parses nothing. Home Assistant's rflink integration is the only thing that interprets the stream.
+#
+# Build it with the ESPHome CLI (`esphome run --device <host> esphome/rflink-bridge.yaml`) or the
+# ESPHome Device Builder add-on. If the C3 still runs the stock esphome-web firmware, the first
+# install can go over the air - see the wifi block below.
+
+substitutions:
+  device_name: rflink-bridge
+  stream_port: "1234"
+
+esphome:
+  name: ${device_name}
+  friendly_name: RFLink Bridge
+
+# Mirrors the stock esphome-web image already on this device (esphome/firmware, esphome-web/esp32c3.yaml),
+# so the platform and framework do not change underneath the OTA.
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+# UART->TCP bridge. Upstream oxan/esphome-stream-server master does not build on ESPHome 2026.7+
+# (network::get_use_address() was removed); this fork is upstream master plus the 4-line fix.
+# Pinned commit at time of writing: 2eade8f0ec9c5282631e09af95f08b634c6a5c20
+external_components:
+  - source: github://grob6000/esphome-stream-server@get_use_address_to
+    components: [stream_server]
+
+# RFLink's serial protocol: 57600 baud, 8 data bits, no parity, 1 stop bit.
+# GPIO21/GPIO20 are UART0 TX/RX on the C3 SuperMini. The shield's routing to the Mega is
+# undocumented, so these are the module defaults and are proven by the Phase 3 acceptance test.
+uart:
+  id: uart_rflink
+  tx_pin: GPIO21
+  rx_pin: GPIO20
+  baud_rate: 57600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  # RTSSHOW emits ~1.3 kB in a burst; give the driver room so nothing is dropped.
+  rx_buffer_size: 1024
+
+stream_server:
+  uart_id: uart_rflink
+  port: ${stream_port}
+  # Must be a power of two. 512 comfortably holds an RTSSHOW burst between loop iterations.
+  buffer_size: 512
+
+binary_sensor:
+  - platform: stream_server
+    connected:
+      name: RFLink client connected
+
+# On ESP32-C3 the logger defaults to USB_SERIAL_JTAG; set explicitly so log output can never be
+# pushed down GPIO21 into the Mega's RX line.
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+# ESPHome 2026.1.0 removed API password authentication; encryption keys replace it.
+# Home Assistant will ask you to re-authenticate this device once and you paste this key.
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # No manual_ip: pin the lease on your router against the C3's MAC instead. One source of truth,
+  # and a wrong static block here cannot lock you out of OTA.
+  #
+  # Taking over a factory `esphome-web-xxxxxx` node for the first time? That node still answers to
+  # its old name, so add `use_address: esphome-web-xxxxxx.local` for the first OTA only, then
+  # delete it again — otherwise later uploads chase a hostname that no longer exists.
+
+  ap:
+    ssid: rflink-bridge-setup
+
+# Fallback hotspot so a bad WiFi change is recoverable without USB-C.
+captive_portal:
